@@ -10,6 +10,7 @@
     <arg name="pose_pitch" default="0.0"/>
     <arg name="pose_yaw" default="1.5707"/>
     <arg name="visualize_laser" default="false"/>
+    <arg name="skin_file" default="walk.dae"/>
 
     <!-- Contents below are partially shared with the `example.launch` -->
     <!-- Actor's map center pose relative to the world center pose -->
@@ -47,6 +48,6 @@
 
     <!-- Spawn actor in the simulation -->
     <node type="xacro_spawner.sh" pkg="hubero_bringup_gazebo_ros" name="actor_xacro_spawner" ns="$(arg actor_name)" output="screen"
-        args="$(arg actor_name) $(arg pose_x) $(arg pose_y) $(arg pose_z) $(arg pose_roll) $(arg pose_pitch) $(arg pose_yaw) $(arg visualize_laser)"
+        args="$(arg actor_name) $(arg pose_x) $(arg pose_y) $(arg pose_z) $(arg pose_roll) $(arg pose_pitch) $(arg pose_yaw) $(arg visualize_laser) $(arg skin_file)"
     />
 </launch>
