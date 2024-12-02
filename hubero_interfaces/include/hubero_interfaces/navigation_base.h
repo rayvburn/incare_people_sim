@@ -169,13 +169,27 @@ public:
 	 * @brief Transforms local velocity (typically received as velocity command) to a global coordinate system
 	 */
 	static Vector3 convertCommandToGlobalCs(const double& yaw_actor, const Vector3& cmd_vel_local) {
-		// slide 38 at https://www.cs.princeton.edu/courses/archive/fall11/cos495/COS495-Lecture3-RobotMotion.pdf
+		// Ref: 19-local-to-global-matrix-form at
+		// https://automaticaddison.com/how-to-describe-the-rotation-of-a-robot-in-2d/
 		ignition::math::Matrix3d r(
-			cos(yaw_actor), 0.0, 0.0,
-			sin(yaw_actor), 0.0, 0.0,
-			0.0, 0.0, 1.0
+			+std::cos(yaw_actor), -std::sin(yaw_actor), +0.0,
+			+std::sin(yaw_actor), +std::cos(yaw_actor), +0.0,
+			+0.0,                 +0.0,                 +1.0
 		);
 		return r * cmd_vel_local;
+	}
+
+	/**
+	 * @brief Transforms a global velocity to a local/base coordinate system
+	 */
+	static Vector3 convertCommandToLocalCs(const double& yaw_actor, const Vector3& vel_global) {
+		// Ref: last equation in https://automaticaddison.com/how-to-describe-the-rotation-of-a-robot-in-2d/
+		ignition::math::Matrix3d r(
+			+std::cos(yaw_actor), +std::sin(yaw_actor), +0.0,
+			-std::sin(yaw_actor), +std::cos(yaw_actor), +0.0,
+			+0.0,                 +0.0,                 +1.0
+		);
+		return r * vel_global;
 	}
 
 protected:

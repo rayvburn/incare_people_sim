@@ -11,12 +11,6 @@ using namespace hubero;
 
 const std::string TF_FRAME_REF = "world";
 
-/// Allows to process any ROS callbacks
-void waitRefreshingRos() {
-	std::this_thread::sleep_for(std::chrono::milliseconds(100));
-	ros::spinOnce();
-}
-
 int main(int argc, char** argv) {
 	// node initialization
 	ros::init(argc, argv, "living_room_scenario_node");
@@ -50,7 +44,7 @@ int main(int argc, char** argv) {
 				return (0);
 			}
 			ROS_INFO("Waiting for Actor2 task to become active. Current state %d...", actor2.getMoveToGoalState());
-			waitRefreshingRos();
+			hubero::TaskRequestRosApi::wait();
 		}
 	}
 
@@ -60,7 +54,7 @@ int main(int argc, char** argv) {
 			ROS_INFO("Node stopped!");
 			return (0);
 		}
-		waitRefreshingRos();
+		hubero::TaskRequestRosApi::wait();
 	}
 
 	ROS_INFO("[SCENARIO] 1st stage completed!");
@@ -72,7 +66,6 @@ int main(int argc, char** argv) {
 	actor2.talk(Vector3(+5.5, +1.0, 0.0), IGN_DTOR(75), TF_FRAME_REF);
 
 	std::this_thread::sleep_for(std::chrono::milliseconds(5000));
-	ros::spinOnce();
 
 	ROS_INFO("Actor2 finishes talking to the person nearby!");
 	actor2.stopTalking();
@@ -98,7 +91,7 @@ int main(int argc, char** argv) {
 				actor1.getMoveToGoalState(),
 				actor2.getMoveToGoalState()
 			);
-			waitRefreshingRos();
+			hubero::TaskRequestRosApi::wait();
 		}
 	}
 
@@ -114,7 +107,7 @@ int main(int argc, char** argv) {
 			ROS_INFO("Node stopped!");
 			return (0);
 		}
-		waitRefreshingRos();
+		hubero::TaskRequestRosApi::wait();
 	}
 	ROS_INFO("[SCENARIO] 3rd stage completed!");
 

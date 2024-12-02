@@ -20,7 +20,10 @@
 #include <hubero_ros_msgs/TalkObjectAction.h>
 #include <hubero_ros_msgs/TeleopAction.h>
 
+#include <tf2_ros/transform_listener.h>
+
 #include <memory>
+#include <thread>
 
 namespace hubero {
 
@@ -33,11 +36,22 @@ namespace hubero {
  */
 class TaskRequestRosApi {
 public:
+	/// Defines the duration of sleeps between subsequent processings of the callback queue
+	const int CALLBACK_SPINNING_SLEEP_TIME_MS = 10;
+
+	/// Defines the duration of sleeps between subsequent evaluations of task conditions
+	const int THREADED_EXECUTOR_SLEEP_TIME_MS = 100;
+
 	/**
 	 * @brief Constructor of @ref TaskRequestRosApi instance
 	 * @param actor_name actor identifier from simulation
 	 */
 	TaskRequestRosApi(const std::string& actor_name);
+
+	/**
+	 * @brief Destructor that kills all spawned threads
+	 */
+	virtual ~TaskRequestRosApi();
 
 	/**
 	 * @defgroup tasks Methods that allow to request specific task from controlled actor
@@ -63,8 +77,6 @@ public:
 
 	/**
 	 * @brief Returns most recent state of the task
-	 *
-	 * @details It will return TASK_FEEDBACK_UNDEFINED if @ref ros::spinOnce() is not used
 	 */
 	TaskFeedbackType getFollowObjectState() const;
 
@@ -108,8 +120,6 @@ public:
 	/**
 	 * @brief Returns most recent state of the task
 	 *
-	 * @details It will return TASK_FEEDBACK_UNDEFINED if @ref ros::spinOnce() is not used
-	 *
 	 * @note Currently: preempted -> finished
 	 */
 	TaskFeedbackType getLieDownState() const;
@@ -143,8 +153,6 @@ public:
 
 	/**
 	 * @brief Returns most recent state of the task
-	 *
-	 * @details It will return TASK_FEEDBACK_UNDEFINED if @ref ros::spinOnce() is not used
 	 */
 	TaskFeedbackType getMoveAroundState() const;
 
@@ -186,8 +194,6 @@ public:
 
 	/**
 	 * @brief Returns most recent state of the task
-	 *
-	 * @details It will return TASK_FEEDBACK_UNDEFINED if @ref ros::spinOnce() is not used
 	 */
 	TaskFeedbackType getMoveToGoalState() const;
 	TaskFeedbackType getMoveToObjectState() const;
@@ -197,6 +203,21 @@ public:
 	 */
 	std::string getMoveToGoalStateDescription() const;
 	std::string getMoveToObjectStateDescription() const;
+
+	/**
+	 * @brief Implements a typical use case where an actor is intended to travel through a given set of waypoints
+	 *
+	 * Execution state can be checked with @ref isThreadExecuting
+	 * This method mustn't be used once another task has been started with the @ref startThreadedExecution
+	 *
+	 * The user must provide that the returned thread object won't go out of scope until the thread is finished.
+	 * Additionally, they should call the std::thread.join() at the end of the scenario executable.
+	 */
+	std::thread moveThroughWaypoints(
+		const std::vector<std::pair<Vector3, double>>& poses2d,
+		const std::string& frame,
+		const ros::Duration& timeout = ros::Duration(0.0)
+	);
 
 	/** @} */ // end of movetogoal group
 
@@ -220,8 +241,6 @@ public:
 
 	/**
 	 * @brief Returns most recent state of the task
-	 *
-	 * @details It will return TASK_FEEDBACK_UNDEFINED if @ref ros::spinOnce() is not used
 	 */
 	TaskFeedbackType getRunState() const;
 
@@ -264,8 +283,6 @@ public:
 
 	/**
 	 * @brief Returns most recent state of the task
-	 *
-	 * @details It will return TASK_FEEDBACK_UNDEFINED if @ref ros::spinOnce() is not used
 	 */
 	TaskFeedbackType getSitDownState() const;
 	TaskFeedbackType getSitDownObjectState() const;
@@ -294,8 +311,6 @@ public:
 
 	/**
 	 * @brief Returns most recent state of the task
-	 *
-	 * @details It will return TASK_FEEDBACK_UNDEFINED if @ref ros::spinOnce() is not used
 	 */
 	TaskFeedbackType getStandState() const;
 
@@ -338,8 +353,6 @@ public:
 
 	/**
 	 * @brief Returns most recent state of the task
-	 *
-	 * @details It will return TASK_FEEDBACK_UNDEFINED if @ref ros::spinOnce() is not used
 	 */
 	TaskFeedbackType getTalkState() const;
 	TaskFeedbackType getTalkObjectState() const;
@@ -372,8 +385,6 @@ public:
 
 	/**
 	 * @brief Returns most recent state of the task
-	 *
-	 * @details It will return TASK_FEEDBACK_UNDEFINED if @ref ros::spinOnce() is not used
 	 */
 	TaskFeedbackType getTeleopState() const;
 
@@ -391,6 +402,65 @@ public:
 	inline std::string getName() const {
 		return actor_name_;
 	}
+
+	/**
+	 * @brief Obtains a pose of the actor in a frame given by @ref frame_reference
+	 */
+	Pose3 getPose(const std::string& frame_reference) const;
+
+	/**
+	 * @defgroup execution Methods related to a task execution in a separate thread
+	 */
+	/**
+	 * @brief Starts the execution of a single task defined by the arguments in a separate thread
+	 *
+	 * This method does not stop previously started task in any way.
+	 *
+	 * @param state_checker_fun a reference to a function that allows checking the state of task execution,
+	 * e.g., @ref getTeleopState; reference is a must here - inline lambda won't work
+	 * @param logging_task_name task name used in logs
+	 * @param timeout timeout for task execution (by default - no limit)
+	 * @param state_executing a state in which the task is assumed to be executing
+	 */
+	void startThreadedExecution(
+		const std::function<TaskFeedbackType()>& state_checker_fun,
+		const std::string& logging_task_name,
+		const ros::Duration& timeout = ros::Duration(0.0),
+		TaskFeedbackType state_executing = TaskFeedbackType::TASK_FEEDBACK_ACTIVE
+	);
+
+	/// Evaluates whether the thread that executes the newest task does still perform computations
+	inline bool isThreadExecuting() const {
+		return threaded_task_execution_requested_ && !threaded_task_execution_done_;
+	}
+
+	/**
+	 * @brief Joins the thread that executes the newest task
+	 *
+	 * Can be also treated as a method that executes a task started with @ref startThreadedExecution in a blocking way
+	 */
+	void join();
+
+	/// @brief Calls @ref std::thread::joinable method on the @ref task_executor_ thread
+	inline bool joinable() const {
+		return task_executor_.joinable();
+	}
+
+	/** @} */ // end of execution group
+
+	/**
+	 * @defgroup utils Static functions that may be handy when designing a custom scenario
+	 */
+	/// Sleeps the current thread for the @ref ms milliseconds
+	static void wait(const std::chrono::milliseconds& ms = std::chrono::milliseconds(500));
+
+	/// Sleeps the current thread for the @ref seconds regarding the ROS time
+	static void waitRosTime(double seconds);
+
+	/// Sleeps the current thread for the @ref duration regarding the ROS time
+	static void waitRosTime(const ros::Duration& duration);
+
+	/** @} */ // end of utils group
 
 protected:
 	std::shared_ptr<Node> node_ptr_;
@@ -498,9 +568,53 @@ protected:
 		return action_client_ptr->getFeedbackText();
 	}
 
+	/**
+	 * A method that is executed in a separate thread (@ref callback_spinner_); periodically calls `ros::spinOnce`
+	 *
+	 * This is necessary for ActionServers to receive messages (otherwise is must've been handled by the user in his
+	 * orchestrating node).
+	 */
+	virtual void callbackProcessingThread();
+
+	/**
+	 * Takes care of the execution of a task defined by the arguments.
+	 *
+	 * This should be called immediately after sending a task request.
+	 *
+	 * @param state_checker_fun a function that allows checking the state of task execution, e.g., @ref getTeleopState
+	 * @param logging_task_name task name used in logs
+	 * @param timeout timeout for task execution (by default no limit)
+	 * @param state_executing a state in which the task is assumed to be executing
+	 */
+	void threadedExecutor(
+		const std::function<TaskFeedbackType()>& state_checker_fun,
+		const std::string& logging_task_name,
+		const ros::Duration& timeout,
+		TaskFeedbackType state_executing
+	);
+
 private:
 	/// Name of the actor provided in the constructor
 	std::string actor_name_;
 
+	/// A separate thread for processing callbacks
+	std::thread callback_spinner_;
+
+	/// A thread for executing a task
+	std::thread task_executor_;
+	/// Atomic flag indicating the request of a threaded execution of a task
+	std::atomic<bool> threaded_task_execution_requested_;
+	/// Atomic flag indicating the finish of computations for @ref task_executor_ thread
+	std::atomic<bool> threaded_task_execution_done_;
+
+	/// Flag set in the destructor to join threads
+	std::atomic<bool> destructing_;
+
+	/// Buffer for obtaining ROS transforms (i.a. self pose)
+	tf2_ros::Buffer tf_buffer_;
+	/// Listener for obtaining ROS transforms (i.a. self pose)
+	tf2_ros::TransformListener tf_listener_;
+	/// Name of the TF frame related to the actor
+	std::string actor_tf_frame_;
 }; // class TaskRequestRosApi
 } // namespace hubero

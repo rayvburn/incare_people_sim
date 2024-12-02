@@ -15,6 +15,8 @@ namespace hubero {
 const int NavigationRos::SUBSCRIBER_QUEUE_SIZE = 10;
 const int NavigationRos::PUBLISHER_QUEUE_SIZE = 15;
 const int NavigationRos::QUATERNION_RANDOM_RETRY_NUM = 10;
+const double NavigationRos::ACTION_RESULT_FREEZE_TIME_SEC = 2.0;
+const double NavigationRos::CMD_VEL_KEEP_DURATION = 1.0;
 
 NavigationRos::NavigationRos():
 	NavigationBase::NavigationBase(),
@@ -24,7 +26,9 @@ NavigationRos::NavigationRos():
 	map_x_max_(0.0),
 	map_y_min_(0.0),
 	map_y_max_(0.0),
-	tf_listener_(tf_buffer_) {}
+	tf_listener_(tf_buffer_),
+	cmd_vel_timestamp_(ros::Time(0)),
+	cmd_vel_timeout_log_timestamp_(ros::Time(0)) {}
 
 bool NavigationRos::initialize(
 	std::shared_ptr<Node> node_ptr,
@@ -222,14 +226,8 @@ void NavigationRos::update(const Pose3& pose, const Vector3& vel_lin, const Vect
 	Pose3 odom_pose = pose - pose_initial_;
 	odometry.pose.pose = ignPoseToMsgPose(odom_pose);
 	setIdealCovariance(odometry.pose.covariance);
-	// twist - velocities expressed in the base frame
-	// pseudoinversion of matrix in NavigationBase::convertCommandToGlobalCs
-	ignition::math::Matrix3d r(
-		cos(pose.Rot().Yaw()), sin(pose.Rot().Yaw()), 0.0,
-		0.0, 0.0, 0.0,
-		0.0, 0.0, 1.0
-	);
-	Vector3 vel_lin_base = r * vel_lin;
+	// twist - velocities expressed in the base frame -> convert global velocity to the local/base velocity
+	Vector3 vel_lin_base = NavigationBase::convertCommandToLocalCs(pose.Rot().Yaw(), vel_lin);
 	// assume that Z axis direction matches simulator frame and 'base' frame (typically valid)
 	Vector3 vel_ang_base(0.0, 0.0, vel_ang.Z());
 	odometry.twist.twist = ignVectorsToMsgTwist(vel_lin_base, vel_ang_base);
@@ -506,6 +504,21 @@ Vector3 NavigationRos::getVelocityCmd() const {
 		return Vector3();
 	}
 
+	// evaluate the age of the command
+	double command_age = (ros::Time::now() - cmd_vel_timestamp_).toSec();
+	if (command_age > NavigationRos::CMD_VEL_KEEP_DURATION) {
+		if ((ros::Time::now() - cmd_vel_timeout_log_timestamp_).toSec() >= 1.0) {
+			cmd_vel_timeout_log_timestamp_ = ros::Time::now();
+			HUBERO_LOG(
+				"[%s].[NavigationRos] Publishing zero velocity as the latest command is outdated - it's %.1fs old, "
+				"while the timeout is %.1fs\r\n",
+				actor_name_.c_str(),
+				command_age,
+				NavigationRos::CMD_VEL_KEEP_DURATION
+			);
+		}
+		return Vector3();
+	}
 	return cmd_vel_;
 }
 
@@ -552,12 +565,27 @@ void NavigationRos::callbackCmdVel(const geometry_msgs::Twist::ConstPtr& msg) {
 	cmd_vel_local.Y(msg->linear.y);
 	cmd_vel_local.Z(msg->angular.z);
 	cmd_vel_ = NavigationBase::convertCommandToGlobalCs(current_pose_.Rot().Yaw(), cmd_vel_local);
+	cmd_vel_timestamp_ = ros::Time::now();
 }
 
 void NavigationRos::callbackFeedback(const move_base_msgs::MoveBaseActionFeedback::ConstPtr& msg) {
 	const std::lock_guard<std::mutex> lock(mutex_callback_);
 	auto fb_type = convertActionStatusToTaskFeedback(msg->status.status);
 	if (fb_type == TASK_FEEDBACK_UNDEFINED) {
+		return;
+	}
+	// The aim is to prevent a late action feedback overriding the result (stored in @ref feedback_)
+	if (
+		(ros::Time::now() - cb_result_timestamp_).toSec() <= NavigationRos::ACTION_RESULT_FREEZE_TIME_SEC
+		&& fb_type == TASK_FEEDBACK_ACTIVE
+	) {
+		HUBERO_LOG(
+			"[%s].[NavigationRos] Action feedback won't be overwritten because the action result has recently been updated (to %d). "
+			"Ignored feedback status is %d\r\n",
+			actor_name_.c_str(),
+			feedback_,
+			fb_type
+		);
 		return;
 	}
 	feedback_ = fb_type;
@@ -570,6 +598,8 @@ void NavigationRos::callbackResult(const move_base_msgs::MoveBaseActionResult::C
 		return;
 	}
 	feedback_ = fb_type;
+	// save for later use in @ref callbackFeedback
+	cb_result_timestamp_ = ros::Time::now();
 }
 
 std::tuple<bool, Pose3> NavigationRos::findTransform(const std::string& frame_source, const std::string& frame_target) const {
@@ -710,12 +740,13 @@ nav_msgs::Path NavigationRos::computePlan(
 	}
 
 	HUBERO_LOG(
-		"[%s].[NavigationRos] Computed plan with %lu poses (goal: {%2.2f, %2.2f}, "
+		"[%s].[NavigationRos] Computed plan with %lu poses (goal: {%2.2f, %2.2f, %2.2f}, "
 		"lastElem: {%2.2f, %2.2f}, secToLastElem: {%2.2f, %2.2f}\r\n",
 		actor_name_.c_str(),
 		resp.plan.poses.size(),
 		pose_goal_global_ref_plane.Pos().X(),
 		pose_goal_global_ref_plane.Pos().Y(),
+		pose_goal_global_ref_plane.Rot().Yaw(),
 		resp.plan.poses.back().pose.position.x,
 		resp.plan.poses.back().pose.position.y,
 		resp.plan.poses.end()[-2].pose.position.x,

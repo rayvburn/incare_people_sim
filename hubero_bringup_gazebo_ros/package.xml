@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <package>
   <name>hubero_bringup_gazebo_ros</name>
-  <version>0.6.0</version>
+  <version>0.7.0</version>
   <description>The hubero_bringup_gazebo_ros package</description>
 
   <author email="chromedivizer@gmail.com">Jarosław Karwowski</author>

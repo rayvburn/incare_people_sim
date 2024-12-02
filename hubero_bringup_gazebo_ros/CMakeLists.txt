@@ -16,6 +16,13 @@ find_package(catkin REQUIRED COMPONENTS
 catkin_package()
 
 ## Install
+install(
+  PROGRAMS
+    scripts/trajectory_spawner.sh
+    scripts/xacro_spawner.sh
+  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
+
 # ref: https://github.com/pal-robotics/tiago_robot/blob/kinetic-devel/tiago_bringup/CMakeLists.txt
 foreach(dir launch maps rviz worlds)
     install(DIRECTORY ${dir}/

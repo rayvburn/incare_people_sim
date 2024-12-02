@@ -3910,12 +3910,6 @@
         <interpolate_x>true</interpolate_x>
       </animation>
 
-      <animation name="stand_up">
-        <filename>stand_up.dae</filename>
-        <scale>1.000000</scale>
-        <interpolate_x>true</interpolate_x>
-      </animation>
-
       <animation name="run">
         <filename>run.dae</filename>
         <scale>1.000000</scale>
@@ -4009,12 +4003,6 @@
 
       <animation name="sitting">
         <filename>sitting.dae</filename>
-        <scale>1.000000</scale>
-        <interpolate_x>true</interpolate_x>
-      </animation>
-
-      <animation name="stand_up">
-        <filename>stand_up.dae</filename>
         <scale>1.000000</scale>
         <interpolate_x>true</interpolate_x>
       </animation>

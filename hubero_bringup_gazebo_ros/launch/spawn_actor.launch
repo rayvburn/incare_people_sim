@@ -1,0 +1,53 @@
+<?xml version="1.0"?>
+
+<launch>
+    <!-- Parameters related to the spawned model -->
+    <arg name="actor_name" default="actor1"/>
+    <arg name="pose_x" default="0.0"/>
+    <arg name="pose_y" default="0.0"/>
+    <arg name="pose_z" default="1.03"/>
+    <arg name="pose_roll" default="1.5707"/>
+    <arg name="pose_pitch" default="0.0"/>
+    <arg name="pose_yaw" default="1.5707"/>
+    <arg name="visualize_laser" default="false"/>
+    <arg name="skin_file" default="walk.dae"/>
+
+    <!-- Contents below are partially shared with the `example.launch` -->
+    <!-- Actor's map center pose relative to the world center pose -->
+    <arg name="tf_world_map" default="+0.00 +0.00 +0.00 +0.00 +0.00 +0.00"/>
+    <arg name="shared_map" default="true"/>
+    <arg name="map_frame" default="map"/>
+    <!-- Name of the frame used as a reference in simulator poses etc. usually, frame at the top of the ROS TF tree -->
+    <arg name="simulator_global_frame" default="world"/>
+
+    <!-- Namespace where communication channels (nodes) of simulated actors will be available -->
+    <arg name="main_ns" default="hubero"/>
+
+    <!-- Arbitrary map selected here -->
+    <arg name="map_file" default="$(find hubero_bringup_gazebo_ros)/maps/parking.yaml"/>
+    <arg name="map_bounds" default="[-10, 20, -10, 20]"/>
+
+    <!-- Motion planning configuration -->
+    <arg name="global_planner" default="navfn"/>
+    <arg name="local_planner" default="teb"/>
+
+    <!-- Run ROS interface for the HuBeRo actor operating in Gazebo simulation -->
+    <!-- NOTE: Loading a map & publishing a static TF performed inside the `actor.launch` -->
+    <include file="$(find hubero_ros)/launch/actor.launch">
+        <arg name="actor_name" value="$(arg actor_name)"/>
+        <arg name="main_ns" value="$(arg main_ns)"/>
+        <arg name="map_file" value="$(arg map_file)"/>
+        <arg name="use_shared_map" value="$(arg shared_map)"/>
+        <arg name="map_frame" value="$(arg map_frame)"/>
+        <arg name="simulator_global_frame" value="$(arg simulator_global_frame)"/>
+        <arg name="tf_world_map" value="$(arg tf_world_map)"/>
+        <arg name="map_bounds" value="$(arg map_bounds)"/>
+        <arg name="local_planner" value="$(arg local_planner)"/>
+        <arg name="global_planner" value="$(arg global_planner)"/>
+    </include>
+
+    <!-- Spawn actor in the simulation -->
+    <node type="xacro_spawner.sh" pkg="hubero_bringup_gazebo_ros" name="actor_xacro_spawner" ns="$(arg actor_name)" output="screen"
+        args="$(arg actor_name) $(arg pose_x) $(arg pose_y) $(arg pose_z) $(arg pose_roll) $(arg pose_pitch) $(arg pose_yaw) $(arg visualize_laser) $(arg skin_file)"
+    />
+</launch>

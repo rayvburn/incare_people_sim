@@ -7,8 +7,13 @@
 namespace hubero {
 
 TaskRequestRosApi::TaskRequestRosApi(const std::string& actor_name):
-	node_ptr_(std::make_shared<Node>("task_request_ros_api_node")
-) {
+	node_ptr_(std::make_shared<Node>("task_request_ros_api_node")),
+	callback_spinner_(std::thread(&TaskRequestRosApi::callbackProcessingThread, this)),
+	threaded_task_execution_requested_(false),
+	threaded_task_execution_done_(false),
+	destructing_(false),
+	tf_listener_(tf_buffer_)
+{
 	// assignment - init list does not support string reference copying
 	actor_name_ = actor_name;
 
@@ -110,6 +115,24 @@ TaskRequestRosApi::TaskRequestRosApi(const std::string& actor_name):
 		hubero_ros_msgs::TeleopActionResultConstPtr>
 		>(node_ptr_, actor_task_ns + TaskRequestBase::getTaskName(TASK_TELEOP)
 	);
+
+	// "path" to obtain the parameter, see the `actor_base_frame` param in the .launch file
+	std::string param_frame = "/hubero_ros/" + actor_name + "/actor_frames/base";
+	node_ptr_->getNodeHandlePtr()->param<std::string>(
+		param_frame,
+		actor_tf_frame_,
+		std::string(actor_name + "base_footprint")
+	);
+}
+
+TaskRequestRosApi::~TaskRequestRosApi() {
+	destructing_ = true;
+	if (task_executor_.joinable()) {
+		task_executor_.join();
+	}
+	if (callback_spinner_.joinable()) {
+		callback_spinner_.join();
+	}
 }
 
 bool TaskRequestRosApi::followObject(const std::string& object_name) {
@@ -247,6 +270,58 @@ std::string TaskRequestRosApi::getMoveToGoalStateDescription() const {
 
 std::string TaskRequestRosApi::getMoveToObjectStateDescription() const {
 	return getActionStateDescription(ac_move_to_object_ptr_);
+}
+
+std::thread TaskRequestRosApi::moveThroughWaypoints(
+	const std::vector<std::pair<Vector3, double>>& poses2d,
+	const std::string& frame,
+	const ros::Duration& timeout
+) {
+	if (isThreadExecuting()) {
+		HUBERO_LOG(
+			"[%s].[TaskRequestRosApi] Could not start 'moveThroughWaypoints' executor as another task is currently "
+			"executed. Returning a thread that will finish immediately.\r\n",
+			getName().c_str()
+		);
+		return std::move(std::thread([]() { ; }));
+	}
+
+	HUBERO_LOG(
+		"[%s].[TaskRequestRosApi].[moveThroughWaypoints] Requested %lu waypoints\r\n",
+		getName().c_str(),
+		poses2d.size()
+	);
+
+	std::thread t(
+		[&, poses2d, frame, timeout]() -> void {
+			std::function<TaskFeedbackType()> feedback_checker = [&]() -> hubero::TaskFeedbackType {
+				return getMoveToGoalState();
+			};
+
+			size_t waypoint_num = 1;
+			for (const auto& waypoint: poses2d) {
+				auto pos = waypoint.first;
+				auto yaw = waypoint.second;
+				HUBERO_LOG(
+					"[%s].[TaskRequestRosApi].[moveThroughWaypoints] Requesting the %lu/%lu waypoint {x: %5.2f, y: %5.2f, theta: %5.2f}\r\n",
+					getName().c_str(),
+					waypoint_num,
+					poses2d.size(),
+					pos.X(),
+					pos.Y(),
+					yaw
+				);
+
+				moveToGoal(pos, yaw, frame);
+				startThreadedExecution(feedback_checker, "moveToGoal", timeout);
+				// waiting for the execution to finish
+				join();
+
+				waypoint_num++;
+			}
+		}
+	);
+	return std::move(t);
 }
 
 bool TaskRequestRosApi::run(const Vector3& pos, const double& yaw, const std::string& frame_id) {
@@ -403,6 +478,155 @@ TaskFeedbackType TaskRequestRosApi::getTeleopState() const {
 
 std::string TaskRequestRosApi::getTeleopStateDescription() const {
 	return getActionStateDescription(ac_teleop_ptr_);
+}
+
+Pose3 TaskRequestRosApi::getPose(const std::string& frame_reference) const {
+	Pose3 transform;
+	try {
+		auto tf_msg = tf_buffer_.lookupTransform(frame_reference, actor_tf_frame_, ros::Time(0));
+		transform = msgTfToPose(tf_msg.transform);
+	} catch (tf2::TransformException& ex) {
+		HUBERO_LOG(
+			"[%s].[TaskRequestRosApi] Could not transform '%s' to '%s' - exception: '%s'\r\n",
+			getName().c_str(),
+			frame_reference.c_str(),
+			actor_tf_frame_.c_str(),
+			ex.what()
+		);
+	}
+	return transform;
+}
+
+void TaskRequestRosApi::startThreadedExecution(
+	const std::function<TaskFeedbackType()>& state_checker_fun,
+	const std::string& logging_task_name,
+	const ros::Duration& timeout,
+	TaskFeedbackType state_executing
+) {
+	threaded_task_execution_requested_ = true;
+	threaded_task_execution_done_ = false;
+	task_executor_ = std::thread(
+		&TaskRequestRosApi::threadedExecutor,
+		this,
+		std::ref(state_checker_fun),
+		logging_task_name,
+		timeout,
+		state_executing
+	);
+}
+
+void TaskRequestRosApi::join() {
+	if (task_executor_.joinable()) {
+		task_executor_.join();
+	}
+	threaded_task_execution_done_ = true;
+	threaded_task_execution_requested_ = false;
+}
+
+// static
+void TaskRequestRosApi::wait(const std::chrono::milliseconds& ms) {
+	std::this_thread::sleep_for(ms);
+}
+
+// static
+void TaskRequestRosApi::waitRosTime(double seconds) {
+	waitRosTime(ros::Duration(seconds));
+}
+
+// static
+void TaskRequestRosApi::waitRosTime(const ros::Duration& duration) {
+	auto time_start_delay = ros::Time::now();
+	auto duration_delay = ros::Time::now() - time_start_delay;
+	while (duration_delay <= duration) {
+		std::this_thread::sleep_for(std::chrono::milliseconds(100));
+		duration_delay = ros::Time::now() - time_start_delay;
+	}
+}
+
+void TaskRequestRosApi::callbackProcessingThread() {
+	while (!destructing_) {
+		if (!ros::ok()) {
+			throw std::runtime_error(
+				"[HuBeRo] [TaskRequestRosApi].[callbackProcessingThread] ROS stopped working, "
+				"won't process any more callbacks"
+			);
+		}
+		ros::spinOnce();
+		std::this_thread::sleep_for(std::chrono::milliseconds(CALLBACK_SPINNING_SLEEP_TIME_MS));
+	}
+}
+
+void TaskRequestRosApi::threadedExecutor(
+	const std::function<TaskFeedbackType()>& state_checker_fun,
+	const std::string& logging_task_name,
+	const ros::Duration& timeout,
+	TaskFeedbackType state_executing
+) {
+	auto timeout_start = ros::Time::now();
+
+	// we will be waiting for actor tasks finishes, so we must also know if the task request was processed
+	while (!destructing_ && state_checker_fun() != state_executing) {
+		if (!ros::ok()) {
+			throw std::runtime_error(
+				"[HuBeRo] [TaskRequestRosApi].[threadedExecutor] ROS stopped working during "
+				+ logging_task_name
+				+ " preparation by the "
+				+ getName()
+			);
+		}
+		if (!timeout.isZero() && (ros::Time::now() - timeout_start) >= timeout) {
+			throw std::runtime_error(
+				"[HuBeRo] [TaskRequestRosApi].[threadedExecutor] Timeout of "
+				+ logging_task_name
+				+ " (preparation) for "
+				+ getName()
+				+ " has elapsed!"
+			);
+		}
+		HUBERO_LOG(
+			"[%s].[TaskRequestRosApi] Waiting for the `%s` task to become active. Current state %d...\r\n",
+			getName().c_str(),
+			logging_task_name.c_str(),
+			state_checker_fun()
+		);
+		std::this_thread::sleep_for(std::chrono::milliseconds(THREADED_EXECUTOR_SLEEP_TIME_MS));
+	}
+
+	HUBERO_LOG(
+		"[%s].[TaskRequestRosApi] `%s` task properly activated (state %d), starting the execution...\r\n",
+		getName().c_str(),
+		logging_task_name.c_str(),
+		state_checker_fun()
+	);
+
+	while (!destructing_ && state_checker_fun() == state_executing) {
+		if (!ros::ok()) {
+			throw std::runtime_error(
+				"[HuBeRo] [TaskRequestRosApi].[threadedExecutor] ROS stopped working during "
+				+ logging_task_name
+				+ " execution by the "
+				+ getName()
+			);
+		}
+		if (!timeout.isZero() && (ros::Time::now() - timeout_start) >= timeout) {
+			throw std::runtime_error(
+				"[HuBeRo] [TaskRequestRosApi].[threadedExecutor] Timeout of "
+				+ logging_task_name
+				+ " (execution) for "
+				+ getName()
+				+ " has elapsed!"
+			);
+		}
+		std::this_thread::sleep_for(std::chrono::milliseconds(THREADED_EXECUTOR_SLEEP_TIME_MS));
+	}
+
+	HUBERO_LOG(
+		"[%s].[TaskRequestRosApi] Execution of `%s` task ended with the state %d\r\n",
+		getName().c_str(),
+		logging_task_name.c_str(),
+		state_checker_fun()
+	);
+	threaded_task_execution_done_ = true;
 }
 
 } // namespace hubero

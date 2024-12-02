@@ -43,6 +43,17 @@ public:
 	static const int QUATERNION_RANDOM_RETRY_NUM;
 
 	/**
+	 * @detail Defines for how long (since the last action result callback) any feedback of the action won't override
+	 * @ref feedback_
+	 */
+	static const double ACTION_RESULT_FREEZE_TIME_SEC;
+
+	/**
+	 * Maximum duration to keep the same velocity command as a valid one; will publish zero velocity after
+	 */
+	static const double CMD_VEL_KEEP_DURATION;
+
+	/**
 	 * @brief Constructor
 	 */
 	NavigationRos();
@@ -200,6 +211,8 @@ protected:
 	ros::Subscriber sub_feedback_;
 	/// @brief Subscriber of the move_base simple action server's result topic
 	ros::Subscriber sub_result_;
+	/// @brief Stores a timestamp of the last result message
+	ros::Time cb_result_timestamp_;
 
 	/// Helper typedefs
 	typedef actionlib::SimpleActionClient<move_base_msgs::MoveBaseAction> MoveBaseActionClient;
@@ -253,7 +266,9 @@ protected:
 	 * @{
 	 */
 	Vector3 cmd_vel_;
+	ros::Time cmd_vel_timestamp_;
 	std::mutex mutex_callback_;
+	mutable ros::Time cmd_vel_timeout_log_timestamp_;
 	/// @}
 
 	/// @brief Initial pose of the actor - used for 'odometry' calculations

@@ -1,0 +1,120 @@
+<?xml version="1.0"?>
+<sdf version="1.6">
+<!-- NOTE: SCRIPTDELETE is placed here as it must be deleted from the resultant .xml to be properly loaded by the Gazebo -->
+<SCRIPTDELETE xmlns:xacro="http://www.ros.org/wiki/xacro">
+    <!-- Also, namespace for ROS topics related to the actor -->
+    <xacro:arg name="actor_name" default="actor" />
+
+    <xacro:arg name="pose_x" default="6.30" />
+    <xacro:arg name="pose_y" default="2.50" />
+    <xacro:arg name="pose_z" default="1.00" />
+    <!-- NOTE: consider performing some calculations regarding the angles here -->
+    <xacro:arg name="pose_roll" default="1.5707" />
+    <xacro:arg name="pose_pitch" default="0.0" />
+    <xacro:arg name="pose_yaw" default="-1.5707" />
+    <xacro:arg name="visualize_laser" default="false" />
+    <xacro:arg name="skin_file" default="walk.dae" />
+
+    <!-- Arg->Property hack from PMB2 description -->
+    <xacro:property name="actor_name" value="$(arg actor_name)" />
+    <xacro:property name="pose_x" value="$(arg pose_x)" />
+    <xacro:property name="pose_y" value="$(arg pose_y)" />
+    <xacro:property name="pose_z" value="$(arg pose_z)" />
+    <xacro:property name="pose_roll" value="$(arg pose_roll)" />
+    <xacro:property name="pose_pitch" value="$(arg pose_pitch)" />
+    <xacro:property name="pose_yaw" value="$(arg pose_yaw)" />
+    <xacro:property name="visualize_laser" value="$(arg visualize_laser)" />
+    <xacro:property name="skin_file" value="$(arg skin_file)" />
+
+    <actor name="${actor_name}">
+        <pose>${pose_x} ${pose_y} ${pose_z} ${pose_roll} ${pose_pitch} ${pose_yaw}</pose>
+        <skin>
+            <filename>${skin_file}</filename>
+            <scale>1.0</scale>
+        </skin>
+        <!-- laser sensor -->
+        <link name="laser_link">
+            <sensor type="gpu_ray" name="laser">
+            <!-- coordinate system info: x - side axis, y - height, z - person's nose heading -->
+            <pose>0 -0.8 0.55 0 -1.57 -1.57</pose>
+            <visualize>${visualize_laser}</visualize>
+            <update_rate>10</update_rate>
+            <ray>
+            <scan>
+                <horizontal>
+                <samples>720</samples>
+                <resolution>1</resolution>
+                <min_angle>-2.170796</min_angle>
+                <max_angle>2.170796</max_angle>
+                </horizontal>
+            </scan>
+            <range>
+                <min>0.10</min>
+                <max>10.0</max>
+                <resolution>0.01</resolution>
+            </range>
+            <noise>
+                <type>gaussian</type>
+                <!-- Noise parameters based on published spec for Hokuyo laser
+                    achieving "+-30mm" accuracy at range < 10m.  A mean of 0.0m and
+                    stddev of 0.01m will put 99.7% of samples within 0.03m of the true
+                    reading. -->
+                <mean>0.0</mean>
+                <stddev>0.01</stddev>
+            </noise>
+            </ray>
+            <plugin name="gazebo_ros_head_hokuyo_controller" filename="libgazebo_ros_gpu_laser.so">
+                <topicName>/hubero/${actor_name}/receptor/laser_scan</topicName>
+                <!-- NOTE: in the .world based spawning method, `frameName` would be filled with the following pattern:
+                <frameName>${actor_name}/base_laser_link</frameName> -->
+                <frameName>base_laser_link</frameName>
+            </plugin>
+        </sensor>
+        </link>
+
+        <animation name="walk">
+            <filename>walk.dae</filename>
+            <scale>1.000000</scale>
+            <interpolate_x>true</interpolate_x>
+        </animation>
+        <animation name="stand">
+            <filename>stand.dae</filename>
+            <scale>1.000000</scale>
+            <interpolate_x>true</interpolate_x>
+        </animation>
+        <animation name="sit_down">
+            <filename>sit_down.dae</filename>
+            <scale>1.000000</scale>
+            <interpolate_x>true</interpolate_x>
+        </animation>
+        <animation name="sitting">
+            <filename>sitting.dae</filename>
+            <scale>1.000000</scale>
+            <interpolate_x>true</interpolate_x>
+        </animation>
+        <animation name="stand_up">
+            <filename>stand_up.dae</filename>
+            <scale>1.000000</scale>
+            <interpolate_x>true</interpolate_x>
+        </animation>
+        <animation name="run">
+            <filename>run.dae</filename>
+            <scale>1.000000</scale>
+            <interpolate_x>true</interpolate_x>
+        </animation>
+        <animation name="talk_a">
+            <filename>talk_a.dae</filename>
+            <scale>1.000000</scale>
+            <interpolate_x>true</interpolate_x>
+        </animation>
+        <animation name="talk_b">
+            <filename>talk_b.dae</filename>
+            <scale>1.000000</scale>
+            <interpolate_x>true</interpolate_x>
+        </animation>
+
+        <plugin name="${actor_name}_plugin" filename="libhubero_gazebo_actor.so">
+        </plugin>
+    </actor>
+</SCRIPTDELETE>
+</sdf>

@@ -30,6 +30,7 @@ include_directories(
 )
 
 set(HUBERO_NAV_ROS hubero_navigation_ros)
+set(HUBERO_TASK_HELPERS hubero_task_helpers)
 set(HUBERO_TASK_ROS hubero_task_request_ros)
 set(HUBERO_TASK_ROS_API hubero_task_request_ros_api)
 set(HUBERO_NODE_ROS hubero_node_ros)
@@ -42,6 +43,7 @@ catkin_package(
 		include
 	LIBRARIES
 		${HUBERO_NAV_ROS}
+		${HUBERO_TASK_HELPERS}
 		${HUBERO_TASK_ROS}
 		${HUBERO_TASK_ROS_API}
 		${HUBERO_NODE_ROS}
@@ -142,8 +144,17 @@ target_link_libraries(${HUBERO_TASK_ROS_API}
 	${catkin_LIBRARIES}
 )
 
+## Functions helping to develop scenarios requiring time/distance synchronization
+add_library(${HUBERO_TASK_HELPERS}
+	include/${PROJECT_NAME}/task_helpers.h
+	src/task_helpers.cpp
+)
+target_link_libraries(${HUBERO_TASK_HELPERS}
+	${HUBERO_TASK_ROS_API}
+)
+
 ## Install
-install(TARGETS ${HUBERO_NAV_ROS} ${HUBERO_TASK_ROS} ${HUBERO_TASK_ROS_API} ${HUBERO_NODE_ROS} ${HUBERO_ROS_STATUS}
+install(TARGETS ${HUBERO_NAV_ROS} ${HUBERO_TASK_ROS} ${HUBERO_TASK_ROS_API} ${HUBERO_NODE_ROS} ${HUBERO_ROS_STATUS} ${HUBERO_TASK_HELPERS}
 	ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
 	LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
 	RUNTIME DESTINATION ${CATKIN_GLOBAL_BIN_DESTINATION}
